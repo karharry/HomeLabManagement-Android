@@ -1,0 +1,10 @@
+$ErrorActionPreference='SilentlyContinue'
+function Sx($n,$o){'##'+$n;$j=ConvertTo-Json -InputObject @($o) -Compress -Depth 3;[regex]::Replace($j,'[^\x00-\x7F]',{param($m) '\u{0:x4}' -f [int][char]$m.Value})}
+function Pf($c){Get-CimInstance ('Win32_PerfFormattedData_'+$c)}
+
+Sx WGSVC (Get-Service -Name 'WireGuardTunnel$*' -ErrorAction SilentlyContinue|select Name,Status)
+'##WGDUMP'
+$wg=(Get-Command wg.exe -ErrorAction SilentlyContinue).Source
+if(!$wg){$wg='C:\Program Files\WireGuard\wg.exe'}
+if(Test-Path $wg){& $wg show all dump 2>$null}
+'##END'

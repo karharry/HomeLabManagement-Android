@@ -1,0 +1,4 @@
+
+softwareupdate -l 2>&1
+echo '---BREW---'
+command -v brew >/dev/null 2>&1 && brew outdated --json=v2 2>/dev/null

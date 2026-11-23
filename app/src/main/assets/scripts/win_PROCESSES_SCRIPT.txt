@@ -1,0 +1,7 @@
+$ErrorActionPreference='SilentlyContinue'
+function Sx($n,$o){'##'+$n;$j=ConvertTo-Json -InputObject @($o) -Compress -Depth 3;[regex]::Replace($j,'[^\x00-\x7F]',{param($m) '\u{0:x4}' -f [int][char]$m.Value})}
+function Pf($c){Get-CimInstance ('Win32_PerfFormattedData_'+$c)}
+
+Sx CORES (Pf 'Counters_ProcessorInformation'|?{$_.Name -ne '_Total'}|select Name)
+Sx PROCS (Pf 'PerfProc_Process'|?{$_.Name -ne '_Total' -and $_.Name -ne 'Idle'}|sort PercentProcessorTime -desc|%{[pscustomobject]@{pid=$_.IDProcess;name=($_.Name -replace '#\d+$','');cpu=$_.PercentProcessorTime;ws=$_.WorkingSetPrivate}})
+'##END'

@@ -1,0 +1,17 @@
+$ErrorActionPreference='SilentlyContinue'
+function Sx($n,$o){'##'+$n;$j=ConvertTo-Json -InputObject @($o) -Compress -Depth 3;[regex]::Replace($j,'[^\x00-\x7F]',{param($m) '\u{0:x4}' -f [int][char]$m.Value})}
+function Pf($c){Get-CimInstance ('Win32_PerfFormattedData_'+$c)}
+
+$nv=(Get-Command nvidia-smi.exe -ErrorAction SilentlyContinue).Source
+if(!$nv){$nv=@("$env:ProgramFiles\NVIDIA Corporation\NVSMI\nvidia-smi.exe","$env:SystemRoot\System32\nvidia-smi.exe")|?{Test-Path $_}|select -First 1}
+'##NVSMI'
+if($nv){& $nv --query-gpu=index,name,utilization.gpu,utilization.memory,memory.used,memory.total,temperature.gpu,power.draw,power.limit,fan.speed,clocks.gr,clocks.max.gr,clocks.mem,clocks.max.mem,driver_version,pstate --format=csv,noheader,nounits 2>$null}
+$pu=@{}
+foreach($e in (Pf 'GPUPerformanceCounters_GPUEngine')){if($e.UtilizationPercentage -gt 0 -and $e.Name -match '^pid_(\d+)_.*engtype_(.+)$'){$pu[$matches[1]+'|'+$matches[2]]+=$e.UtilizationPercentage}}
+$pm=@{}
+foreach($e in (Pf 'GPUPerformanceCounters_GPUProcessMemory')){if($e.Name -match '^pid_(\d+)_'){$pm[[int]$matches[1]]+=$e.DedicatedUsage}}
+$ids=@{}
+foreach($k in $pu.Keys){$p=$k.Split('|');$i=[int]$p[0];$v=[math]::Min(100,$pu[$k]);if($v -gt $ids[$i]){$ids[$i]=$v}}
+foreach($k in $pm.Keys){if(-not $ids.ContainsKey($k)){$ids[$k]=0}}
+Sx GPUPROC ($ids.Keys|%{[pscustomobject]@{pid=$_;name=(Get-Process -Id $_ -ErrorAction SilentlyContinue).ProcessName;util=$ids[$_];vram=[double]$pm[$_]}}|sort util,vram -desc|select -First 15)
+'##END'

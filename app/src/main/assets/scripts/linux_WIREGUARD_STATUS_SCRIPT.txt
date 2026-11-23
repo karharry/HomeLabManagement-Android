@@ -1,0 +1,3 @@
+ls /etc/wireguard/*.conf 2>/dev/null | xargs -n1 basename 2>/dev/null | sed 's/\.conf$//'
+echo '---DUMP---'
+wg show all dump 2>/dev/null

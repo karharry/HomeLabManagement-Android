@@ -1,0 +1,10 @@
+
+for vm in $(virsh -c qemu:///system list --all --name 2>/dev/null); do
+  [ -z "$vm" ] && continue
+  info="$(virsh -c qemu:///system dominfo "$vm" 2>/dev/null)"
+  state=$(echo "$info" | awk -F': +' '/^State:/{print $2}')
+  autostart=$(echo "$info" | awk -F': +' '/^Autostart:/{print $2}')
+  vcpus=$(echo "$info" | awk -F': +' '/^CPU\(s\):/{print $2}')
+  maxmem=$(echo "$info" | awk -F': +' '/^Max memory:/{print $2}')
+  echo "VM|$vm|$state|$autostart|$vcpus|$maxmem"
+done

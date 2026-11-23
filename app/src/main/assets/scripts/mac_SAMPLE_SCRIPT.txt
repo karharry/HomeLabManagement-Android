@@ -1,0 +1,24 @@
+
+echo '##HOST'
+hostname -s
+sw_vers -productName
+sw_vers -productVersion
+echo $(( $(date +%s) - $(sysctl -n kern.boottime | awk -F'[ ,]+' '{print $4}') ))
+sysctl -n hw.memsize
+echo '##PAGESIZE'
+sysctl -n hw.pagesize
+echo '##VMSTAT'
+vm_stat
+echo '##TOP'
+top -l 1 -n 0 | grep -E '^CPU usage'
+echo '##DF'
+df -k 2>/dev/null | tail -n +2
+echo '##LAUNCHD'
+launchctl list 2>/dev/null | tail -n +2
+echo '##NETSTAT'
+netstat -ib 2>/dev/null | tail -n +2
+echo '##FEAT'
+command -v docker >/dev/null 2>&1 && echo DOCKER
+command -v tailscale >/dev/null 2>&1 && echo TAILSCALE
+command -v wg >/dev/null 2>&1 && echo WIREGUARD
+echo '##END'

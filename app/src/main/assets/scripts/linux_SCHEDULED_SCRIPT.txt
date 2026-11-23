@@ -1,0 +1,3 @@
+crontab -l 2>/dev/null
+echo '---TIMERS---'
+systemctl list-timers --all --no-legend --no-pager 2>/dev/null

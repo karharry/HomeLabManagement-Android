@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">HomeLab Management</string>
+    <string name="widget_description">Status of all your machines at a glance</string>
+</resources>

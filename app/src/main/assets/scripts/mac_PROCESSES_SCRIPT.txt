@@ -1,0 +1,1 @@
+ps -eo pid,pcpu,rss,comm -r | tail -n +2 | head -60

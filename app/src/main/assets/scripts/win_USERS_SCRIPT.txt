@@ -1,0 +1,6 @@
+$ErrorActionPreference='SilentlyContinue'
+function Sx($n,$o){'##'+$n;$j=ConvertTo-Json -InputObject @($o) -Compress -Depth 3;[regex]::Replace($j,'[^\x00-\x7F]',{param($m) '\u{0:x4}' -f [int][char]$m.Value})}
+function Pf($c){Get-CimInstance ('Win32_PerfFormattedData_'+$c)}
+
+Sx USR (quser 2>$null | Select-Object -Skip 1 | %{$l=$_.Trim() -replace '\s{2,}',',';$f=$l.Split(',');[pscustomobject]@{name=$f[0];session=$(if($f.Count -gt 1){$f[1]}else{''});state=$(if($f.Count -gt 3){$f[3]}else{''});idle=$(if($f.Count -gt 4){$f[4]}else{''});logon=$(if($f.Count -gt 5){$f[5]}else{''})})
+'##END'

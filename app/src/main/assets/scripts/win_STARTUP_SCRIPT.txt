@@ -1,0 +1,27 @@
+$ErrorActionPreference='SilentlyContinue'
+function Sx($n,$o){'##'+$n;$j=ConvertTo-Json -InputObject @($o) -Compress -Depth 3;[regex]::Replace($j,'[^\x00-\x7F]',{param($m) '\u{0:x4}' -f [int][char]$m.Value})}
+function Pf($c){Get-CimInstance ('Win32_PerfFormattedData_'+$c)}
+
+$ap='\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\'
+function Dis($path,$name){try{$v=Get-ItemPropertyValue -LiteralPath $path -Name $name -ErrorAction Stop}catch{$v=$null};[bool]($v -and ($v[0] -band 1))}
+function Exe($c){$c=[Environment]::ExpandEnvironmentVariables($c);if($c -match '^\s*"([^"]+)"'){$matches[1]}elseif($c -match '^\s*(.+?\.(exe|bat|cmd|com|lnk|msc))'){$matches[1]}else{($c.Trim() -split ' ')[0]}}
+function Pub($c){$p=Exe $c;if($p -and (Test-Path -LiteralPath $p)){$i=(Get-Item -LiteralPath $p).VersionInfo;if($i.CompanyName){$i.CompanyName.Trim()}elseif($i.ProductName){$i.ProductName.Trim()}}}
+$o=@()
+foreach($r in @(@('hklm','HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',('HKLM:'+$ap+'Run'),'All users'),@('hklm32','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run',('HKLM:'+$ap+'Run32'),'All users (32-bit)'),@('hkcu','HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',('HKCU:'+$ap+'Run'),'Current user'))){
+  $k=Get-ItemProperty -LiteralPath $r[1] -ErrorAction SilentlyContinue
+  if(!$k){continue}
+  foreach($pr in $k.PSObject.Properties){if($pr.Name -match '^PS'){continue};$o+=[pscustomobject]@{kind=$r[0];name=$pr.Name;cmd=[string]$pr.Value;pub=[string](Pub $pr.Value);scope=$r[3];disabled=(Dis $r[2] $pr.Name);path=''}}
+}
+foreach($f in @(@('folderUser',"$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup",('HKCU:'+$ap+'StartupFolder'),'Current user'),@('folderAll',"$env:ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp",('HKLM:'+$ap+'StartupFolder'),'All users'))){
+  if(!(Test-Path -LiteralPath $f[1])){continue}
+  foreach($i in (Get-ChildItem -LiteralPath $f[1] -File -Force -ErrorAction SilentlyContinue|?{$_.Name -ne 'desktop.ini'})){
+    $c=$i.FullName;if($i.Extension -eq '.lnk'){try{$s=(New-Object -ComObject WScript.Shell).CreateShortcut($i.FullName);$c=('"'+$s.TargetPath+'" '+$s.Arguments).Trim()}catch{}}
+    $o+=[pscustomobject]@{kind=$f[0];name=$i.Name;cmd=$c;pub=[string](Pub $c);scope=$f[3];disabled=(Dis $f[2] $i.Name);path=''}
+  }
+}
+foreach($t in (Get-ScheduledTask -ErrorAction SilentlyContinue|?{$_.TaskPath -notlike '\Microsoft\Windows\*' -and ($_.Triggers|?{$_.CimClass.CimClassName -match 'LogonTrigger|BootTrigger'})})){
+  $a=$t.Actions|select -First 1;$c=(([string]$a.Execute)+' '+([string]$a.Arguments)).Trim()
+  $o+=[pscustomobject]@{kind='task';name=$t.TaskName;cmd=$c;pub=[string](Pub $c);scope=$(if($t.Principal.UserId){[string]$t.Principal.UserId}else{'Task Scheduler'});disabled=($t.State -eq 'Disabled');path=$t.TaskPath}
+}
+Sx STARTUP $o
+'##END'

@@ -1,0 +1,69 @@
+
+echo '##OSREL'
+cat /etc/os-release 2>/dev/null
+[ -e /run/ostree-booted ] && echo 'OSTREE=1'
+echo '##CPUCAP'
+lscpu 2>/dev/null
+awk -F': ' '/^microcode/{print "microcode: "$2; exit}' /proc/cpuinfo
+echo '##CPUFREQ'
+for c in /sys/devices/system/cpu/cpu[0-9]*; do
+  echo "${c##*/} $(cat $c/cpufreq/scaling_cur_freq 2>/dev/null)"
+done
+echo '##CPUPOL'
+p=/sys/devices/system/cpu/cpu0/cpufreq
+echo "governor=$(cat $p/scaling_governor 2>/dev/null)"
+echo "driver=$(cat $p/scaling_driver 2>/dev/null)"
+echo "epp=$(cat $p/energy_performance_preference 2>/dev/null)"
+echo "min=$(cat $p/cpuinfo_min_freq 2>/dev/null)"
+echo "max=$(cat $p/cpuinfo_max_freq 2>/dev/null)"
+echo "boost=$(cat /sys/devices/system/cpu/cpufreq/boost 2>/dev/null)"
+echo "no_turbo=$(cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null)"
+echo "smt=$(cat /sys/devices/system/cpu/smt/control 2>/dev/null)"
+echo '##HWMON'
+for h in /sys/class/hwmon/hwmon*; do
+  name=$(cat $h/name 2>/dev/null)
+  dev=$(basename "$(readlink -f $h/device 2>/dev/null)")
+  for f in $h/temp*_input $h/fan*_input $h/power*_average $h/power*_input $h/in*_input $h/freq*_input; do
+    [ -r "$f" ] || continue
+    b=${f##*/}; pre=${b%_*}
+    lbl=$(cat $h/${pre}_label 2>/dev/null)
+    v=$(cat $f 2>/dev/null) || continue
+    echo "$name|$dev|$b|$lbl|$v"
+  done
+done
+echo '##GPU'
+for c in /sys/class/drm/card[0-9]*; do
+  case "${c##*/}" in *-*) continue;; esac
+  d=$c/device
+  [ -r $d/vendor ] || continue
+  slot=$(basename "$(readlink -f $d)")
+  echo "CARD|${c##*/}|$slot|$(cat $d/vendor)|$(cat $d/device)|$(basename "$(readlink -f $d/driver 2>/dev/null)")"
+  for k in gpu_busy_percent mem_busy_percent mem_info_vram_used mem_info_vram_total mem_info_gtt_used mem_info_gtt_total \
+           current_link_speed current_link_width power_dpm_force_performance_level; do
+    [ -r $d/$k ] && echo "ATTR|$k|$(cat $d/$k 2>/dev/null)"
+  done
+  for k in gt_cur_freq_mhz gt_act_freq_mhz gt_max_freq_mhz gt_min_freq_mhz gt_boost_freq_mhz; do
+    [ -r $c/$k ] && echo "ATTR|$k|$(cat $c/$k 2>/dev/null)"
+  done
+  [ -r $d/tile0/gt0/freq0/cur_freq ] && echo "ATTR|gt_cur_freq_mhz|$(cat $d/tile0/gt0/freq0/cur_freq)"
+  [ -r $d/tile0/gt0/freq0/max_freq ] && echo "ATTR|gt_max_freq_mhz|$(cat $d/tile0/gt0/freq0/max_freq)"
+  for k in pp_dpm_sclk pp_dpm_mclk; do
+    [ -r $d/$k ] && echo "ATTR|$k|$(grep '\*' $d/$k 2>/dev/null | head -1)"
+  done
+  for hw in $d/hwmon/hwmon*; do
+    [ -d "$hw" ] || continue
+    for f in $hw/temp*_input $hw/power*_average $hw/power*_input $hw/power*_cap $hw/fan*_input $hw/fan*_max $hw/pwm1 $hw/pwm1_max $hw/freq*_input $hw/in0_input; do
+      [ -r "$f" ] || continue
+      b=${f##*/}; pre=${b%_*}
+      echo "HW|$b|$(cat $hw/${pre}_label 2>/dev/null)|$(cat $f 2>/dev/null)"
+    done
+  done
+  echo "NAME|$(lspci -s "$slot" -vmm 2>/dev/null | awk -F'\t' '/^Device:/{print $2; exit}')|$(lspci -s "$slot" -vmm 2>/dev/null | awk -F'\t' '/^Vendor:/{print $2; exit}')"
+  echo "END"
+done
+echo '##NVIDIA'
+command -v nvidia-smi >/dev/null 2>&1 && {
+  nvidia-smi --query-gpu=index,name,utilization.gpu,utilization.memory,memory.used,memory.total,temperature.gpu,power.draw,power.limit,fan.speed,clocks.gr,clocks.max.gr,clocks.mem,clocks.max.mem,driver_version,pstate --format=csv,noheader,nounits 2>/dev/null
+  echo '##NVBUS'
+  nvidia-smi --query-gpu=index,pci.bus_id --format=csv,noheader 2>/dev/null
+}

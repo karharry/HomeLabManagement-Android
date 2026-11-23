@@ -1,0 +1,2 @@
+systemctl is-active kvmd 2>/dev/null
+mount | awk '$3=="/"{if($0~/\(rw/)print "rw"; else print "ro"}'

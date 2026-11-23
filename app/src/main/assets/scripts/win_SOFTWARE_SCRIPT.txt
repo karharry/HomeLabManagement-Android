@@ -1,0 +1,7 @@
+$ErrorActionPreference='SilentlyContinue'
+function Sx($n,$o){'##'+$n;$j=ConvertTo-Json -InputObject @($o) -Compress -Depth 3;[regex]::Replace($j,'[^\x00-\x7F]',{param($m) '\u{0:x4}' -f [int][char]$m.Value})}
+function Pf($c){Get-CimInstance ('Win32_PerfFormattedData_'+$c)}
+
+$keys='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*','HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
+Sx SOFT (Get-ItemProperty $keys -ErrorAction SilentlyContinue|?{$_.DisplayName -and -not $_.SystemComponent}|select @{n='name';e={$_.DisplayName}},@{n='version';e={[string]$_.DisplayVersion}},@{n='publisher';e={$_.Publisher}} -Unique)
+'##END'

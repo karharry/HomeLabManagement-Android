@@ -1,0 +1,6 @@
+$ErrorActionPreference='SilentlyContinue'
+function Sx($n,$o){'##'+$n;$j=ConvertTo-Json -InputObject @($o) -Compress -Depth 3;[regex]::Replace($j,'[^\x00-\x7F]',{param($m) '\u{0:x4}' -f [int][char]$m.Value})}
+function Pf($c){Get-CimInstance ('Win32_PerfFormattedData_'+$c)}
+
+Sx TASKS (Get-ScheduledTask -ErrorAction SilentlyContinue|?{$_.TaskPath -notlike '\Microsoft\*'}|select @{n='name';e={$_.TaskName}},@{n='path';e={$_.TaskPath}},@{n='state';e={[string]$_.State}})
+'##END'

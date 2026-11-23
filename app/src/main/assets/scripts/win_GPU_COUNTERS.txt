@@ -1,0 +1,7 @@
+
+$g=@{}
+foreach($e in (Pf 'GPUPerformanceCounters_GPUEngine')){if($e.UtilizationPercentage -gt 0 -and $e.Name -match 'luid_(0x[0-9A-Fa-f]+_0x[0-9A-Fa-f]+)_phys_\d+_eng_(\d+)_engtype_(.+)$'){$g[$matches[1]+'|'+$matches[3]+'|'+$matches[2]]+=$e.UtilizationPercentage}}
+$t=@{}
+foreach($k in $g.Keys){$p=$k.Split('|');$id=$p[0]+'|'+$p[1];$v=[math]::Min(100,$g[$k]);if($v -gt $t[$id]){$t[$id]=$v}}
+Sx GPUENG ($t.Keys|%{$p=$_.Split('|');[pscustomobject]@{luid=$p[0];type=$p[1];util=$t[$_]}})
+Sx GPUMEM ((Pf 'GPUPerformanceCounters_GPUAdapterMemory')|%{if($_.Name -match 'luid_(0x[0-9A-Fa-f]+_0x[0-9A-Fa-f]+)_phys_(\d+)'){[pscustomobject]@{luid=$matches[1];phys=[int]$matches[2];ded=$_.DedicatedUsage}}})

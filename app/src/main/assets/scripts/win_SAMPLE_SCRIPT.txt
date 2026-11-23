@@ -1,0 +1,29 @@
+$ErrorActionPreference='SilentlyContinue'
+function Sx($n,$o){'##'+$n;$j=ConvertTo-Json -InputObject @($o) -Compress -Depth 3;[regex]::Replace($j,'[^\x00-\x7F]',{param($m) '\u{0:x4}' -f [int][char]$m.Value})}
+function Pf($c){Get-CimInstance ('Win32_PerfFormattedData_'+$c)}
+
+$os=Get-CimInstance Win32_OperatingSystem
+Sx HOST ([pscustomobject]@{name=$env:COMPUTERNAME;os=$os.Caption;up=[int]((Get-Date)-$os.LastBootUpTime).TotalSeconds;memTotal=[double]$os.TotalVisibleMemorySize*1KB;memFree=[double]$os.FreePhysicalMemory*1KB})
+Sx MEM (Pf 'PerfOS_Memory'|select AvailableBytes)
+Sx CORES (Pf 'Counters_ProcessorInformation'|select Name,PercentProcessorUtility,PercentProcessorTime,PercentProcessorPerformance)
+Sx CPUINFO (Get-CimInstance Win32_Processor|select Name,Manufacturer,NumberOfCores,NumberOfLogicalProcessors,MaxClockSpeed,L2CacheSize,L3CacheSize,VirtualizationFirmwareEnabled)
+Sx VOL (Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3'|select DeviceID,VolumeName,Size,FreeSpace)
+Sx SVC (Get-CimInstance Win32_Service|select Name,DisplayName,State,StartMode)
+Sx NET (Pf 'Tcpip_NetworkInterface'|select Name,BytesReceivedPersec,BytesSentPersec)
+$lh=Get-CimInstance -Namespace root/LibreHardwareMonitor -ClassName Sensor
+if(!$lh){$lh=Get-CimInstance -Namespace root/OpenHardwareMonitor -ClassName Sensor}
+Sx SENS ($lh|?{$_.SensorType -notin 'Throughput','Factor','Level','SmallData'}|select Name,SensorType,Value,Identifier)
+'##FEAT'
+if(Test-Path 'C:\Program Files\WireGuard\wireguard.exe'){'WIREGUARD'}
+
+$vr=@{}
+Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0*'|%{$q=$_.'HardwareInformation.qwMemorySize';if($q -is [byte[]]){$q=[BitConverter]::ToUInt64($q,0)};if($q){$vr[[string]$_.DriverDesc]=[double]$q}}
+Sx GPUS (Get-CimInstance Win32_VideoController|%{[pscustomobject]@{name=$_.Name;ram=[double]$_.AdapterRAM;vram=$vr[[string]$_.Name];driver=$_.DriverVersion;date=$(if($_.DriverDate){$_.DriverDate.ToString('yyyy-MM-dd')});status=$_.Status;proc=$_.VideoProcessor}})
+
+$g=@{}
+foreach($e in (Pf 'GPUPerformanceCounters_GPUEngine')){if($e.UtilizationPercentage -gt 0 -and $e.Name -match 'luid_(0x[0-9A-Fa-f]+_0x[0-9A-Fa-f]+)_phys_\d+_eng_(\d+)_engtype_(.+)$'){$g[$matches[1]+'|'+$matches[3]+'|'+$matches[2]]+=$e.UtilizationPercentage}}
+$t=@{}
+foreach($k in $g.Keys){$p=$k.Split('|');$id=$p[0]+'|'+$p[1];$v=[math]::Min(100,$g[$k]);if($v -gt $t[$id]){$t[$id]=$v}}
+Sx GPUENG ($t.Keys|%{$p=$_.Split('|');[pscustomobject]@{luid=$p[0];type=$p[1];util=$t[$_]}})
+Sx GPUMEM ((Pf 'GPUPerformanceCounters_GPUAdapterMemory')|%{if($_.Name -match 'luid_(0x[0-9A-Fa-f]+_0x[0-9A-Fa-f]+)_phys_(\d+)'){[pscustomobject]@{luid=$matches[1];phys=[int]$matches[2];ded=$_.DedicatedUsage}}})
+'##END'

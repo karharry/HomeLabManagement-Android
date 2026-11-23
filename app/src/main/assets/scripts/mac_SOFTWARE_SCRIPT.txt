@@ -1,0 +1,10 @@
+
+for a in /Applications/*.app /Applications/*/*.app; do
+  [ -e "$a" ] || continue
+  name=$(basename "$a" .app)
+  ver=$(defaults read "$a/Contents/Info" CFBundleShortVersionString 2>/dev/null)
+  echo "APP|$name|$ver"
+done
+if command -v brew >/dev/null 2>&1; then
+  brew list --versions 2>/dev/null | while read -r line; do echo "BREW|$line"; done
+fi

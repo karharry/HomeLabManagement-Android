@@ -1,0 +1,8 @@
+
+echo '##THERM'
+pmset -g therm
+echo '##PS'
+pmset -g ps | head -1
+echo '##BATT'
+ioreg -rn AppleSmartBattery
+echo '##END'

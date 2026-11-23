@@ -1,0 +1,7 @@
+$ErrorActionPreference='SilentlyContinue'
+function Sx($n,$o){'##'+$n;$j=ConvertTo-Json -InputObject @($o) -Compress -Depth 3;[regex]::Replace($j,'[^\x00-\x7F]',{param($m) '\u{0:x4}' -f [int][char]$m.Value})}
+function Pf($c){Get-CimInstance ('Win32_PerfFormattedData_'+$c)}
+
+Sx HOTFIX (Get-HotFix -ErrorAction SilentlyContinue|select HotFixID,@{n='date';e={if($_.InstalledOn){$_.InstalledOn.ToString('yyyy-MM-dd')}}})
+Sx WU ([pscustomobject]@{state=(Get-Service wuauserv -ErrorAction SilentlyContinue).Status.ToString()})
+'##END'

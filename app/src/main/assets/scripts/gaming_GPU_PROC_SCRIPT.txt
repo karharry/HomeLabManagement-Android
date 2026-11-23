@@ -1,0 +1,7 @@
+
+echo '##DRMPROC'
+grep -s -H -E '^(drm-driver|drm-client-id|drm-memory-vram|drm-total-vram0|drm-total-local0|drm-resident-vram0|drm-engine-gfx|drm-engine-render):' /proc/[0-9]*/fdinfo/* 2>/dev/null
+echo '##PS'
+ps -eo pid=,comm= 2>/dev/null
+echo '##NVPMON'
+command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi pmon -c 1 -s um 2>/dev/null

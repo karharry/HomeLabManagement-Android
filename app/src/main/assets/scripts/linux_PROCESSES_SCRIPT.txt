@@ -1,0 +1,1 @@
+ps -eo pid,user:20,pcpu,pmem,comm --sort=-pcpu --no-headers | head -60

@@ -1,0 +1,8 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- The HomeLab Management icon (same artwork as the desktop apps' app_icon.svg: hexagon + dot), scaled into the adaptive-icon safe zone. -->
+    <group android:scaleX="0.62" android:scaleY="0.62" android:translateX="14.3" android:translateY="14.3">
+        <path android:pathData="M24,80V56l40,-26 40,26v24l-40,26z" android:strokeColor="#FFFFFF" android:strokeWidth="8" android:strokeLineJoin="round" android:fillColor="#00000000" />
+        <path android:pathData="M54,68a10,10 0,1 0,20 0a10,10 0,1 0,-20 0z" android:fillColor="#FFFFFF" />
+    </group>
+</vector>

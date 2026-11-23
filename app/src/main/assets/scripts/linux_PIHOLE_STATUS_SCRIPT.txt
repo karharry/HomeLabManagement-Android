@@ -1,0 +1,3 @@
+pihole status 2>/dev/null
+echo '---JSON---'
+pihole -c -j 2>/dev/null

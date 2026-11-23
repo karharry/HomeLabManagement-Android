@@ -1,0 +1,15 @@
+
+echo '##ITEMS'
+for d in /Library/LaunchAgents "$HOME/Library/LaunchAgents" /Library/LaunchDaemons; do
+  dom="gui/$(id -u)"; [ "$d" = "/Library/LaunchDaemons" ] && dom="system"
+  [ -d "$d" ] || continue
+  for f in "$d"/*.plist; do
+    [ -e "$f" ] || continue
+    label=$(defaults read "$f" Label 2>/dev/null)
+    [ -z "$label" ] && label=$(basename "$f" .plist)
+    echo "ITEM|$dom|$label|$d"
+  done
+done
+echo '##DISABLED'
+launchctl print-disabled "gui/$(id -u)" 2>/dev/null
+launchctl print-disabled system 2>/dev/null

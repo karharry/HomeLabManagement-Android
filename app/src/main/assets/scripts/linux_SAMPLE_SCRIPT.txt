@@ -1,0 +1,35 @@
+
+echo '##HOST'
+hostname
+( . /etc/os-release 2>/dev/null && echo "$PRETTY_NAME" ) || echo Linux
+uname -r
+uname -m
+cut -d' ' -f1 /proc/uptime
+nproc
+echo '##CPUINFO'
+awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo
+awk -F': ' '/^cpu MHz/{print $2; exit}' /proc/cpuinfo
+echo '##STAT'
+grep '^cpu' /proc/stat
+echo '##MEM'
+cat /proc/meminfo
+echo '##NET'
+cat /proc/net/dev
+echo '##DF'
+df -PT -B1 -x tmpfs -x devtmpfs -x squashfs -x overlay -x efivarfs -x iso9660 2>/dev/null | tail -n +2
+echo '##SVC'
+systemctl list-units --type=service --all --plain --no-legend --no-pager 2>/dev/null
+echo '##ZPOOL'
+command -v zpool >/dev/null 2>&1 && zpool list -Hp -o name,size,allocated,free,health
+echo '##FEAT'
+command -v docker >/dev/null 2>&1 && echo DOCKER
+command -v pihole >/dev/null 2>&1 && echo PIHOLE
+systemctl list-unit-files 2>/dev/null | grep -q '^kvmd\.service' && echo PIKVM
+command -v tailscale >/dev/null 2>&1 && echo TAILSCALE
+command -v vcgencmd >/dev/null 2>&1 && echo RASPI
+command -v wg >/dev/null 2>&1 && echo WIREGUARD
+command -v protonvpn-cli >/dev/null 2>&1 && echo PROTONVPN
+command -v nvidia-smi >/dev/null 2>&1 && echo NVIDIA
+command -v virsh >/dev/null 2>&1 && echo LIBVIRT
+grep -qE 'vmx|svm' /proc/cpuinfo 2>/dev/null && echo VTX
+echo '##END'

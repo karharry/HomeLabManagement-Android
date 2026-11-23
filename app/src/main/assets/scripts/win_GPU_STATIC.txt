@@ -1,0 +1,4 @@
+
+$vr=@{}
+Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0*'|%{$q=$_.'HardwareInformation.qwMemorySize';if($q -is [byte[]]){$q=[BitConverter]::ToUInt64($q,0)};if($q){$vr[[string]$_.DriverDesc]=[double]$q}}
+Sx GPUS (Get-CimInstance Win32_VideoController|%{[pscustomobject]@{name=$_.Name;ram=[double]$_.AdapterRAM;vram=$vr[[string]$_.Name];driver=$_.DriverVersion;date=$(if($_.DriverDate){$_.DriverDate.ToString('yyyy-MM-dd')});status=$_.Status;proc=$_.VideoProcessor}})

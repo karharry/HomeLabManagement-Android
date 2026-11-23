@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.3
+- Editing a port number no longer snaps back to "0" when the field is cleared.
+- Removed an unused foreground-service permission (nothing in the app runs a foreground service).
+- Launch shortcut applies once, so it cannot pull you back to a page later.
+- Google Play assets and listing text added under `play-store/`.
+
 ## 0.9.2
 Fixes from testing against a real OPNsense 26.7 firewall:
 - Services now show their real state (all were shown as stopped).

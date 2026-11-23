@@ -55,7 +55,7 @@ fun EditorScreen(machineId: String?, onDone: () -> Unit) {
             }
             Field("Name (optional)", m.name) { m = m.copy(name = it) }
             Field("Address (host or IP)", m.host, KeyboardType.Uri) { m = m.copy(host = it.trim()) }
-            Field(if (k == MachineKind.truenas || k == MachineKind.opnsense) "Web / API port" else "SSH port", m.port.toString(), KeyboardType.Number) { m = m.copy(port = it.toIntOrNull() ?: 0) }
+            Field(if (k == MachineKind.truenas || k == MachineKind.opnsense) "Web / API port" else "SSH port", (m.port.let { if (it == 0) "" else it.toString() }), KeyboardType.Number) { m = m.copy(port = it.toIntOrNull() ?: 0) }
 
             when (k) {
                 MachineKind.truenas -> {
@@ -68,13 +68,13 @@ fun EditorScreen(machineId: String?, onDone: () -> Unit) {
                     Text("Optional SSH (containers, VM stats, console, VPN)", style = MaterialTheme.typography.titleSmall)
                     SwitchRow("Enable SSH", m.sshEnabled) { m = m.copy(sshEnabled = it) }
                     if (m.sshEnabled) {
-                        Field("SSH port", m.sshPort.toString(), KeyboardType.Number) { m = m.copy(sshPort = it.toIntOrNull() ?: 22) }
+                        Field("SSH port", (m.sshPort.let { if (it == 0) "" else it.toString() }), KeyboardType.Number) { m = m.copy(sshPort = it.toIntOrNull() ?: 22) }
                         Field("SSH user", m.sshUser) { m = m.copy(sshUser = it.trim()) }
                         Field("SSH password", sshPw, password = true) { sshPw = it }
                         SwitchRow("Use sudo", m.sshSudo) { m = m.copy(sshSudo = it) }
                     }
                     Text("Fan controller (optional)", style = MaterialTheme.typography.titleSmall)
-                    Field("Fan controller port", m.fanPort.toString(), KeyboardType.Number) { m = m.copy(fanPort = it.toIntOrNull() ?: 9595) }
+                    Field("Fan controller port", (m.fanPort.let { if (it == 0) "" else it.toString() }), KeyboardType.Number) { m = m.copy(fanPort = it.toIntOrNull() ?: 9595) }
                     Field("Fan controller password (blank if none)", fanPw, password = true) { fanPw = it }
                 }
                 MachineKind.opnsense -> {
@@ -87,7 +87,7 @@ fun EditorScreen(machineId: String?, onDone: () -> Unit) {
                     Field("User name", m.user) { m = m.copy(user = it.trim()) }
                     Field("Password", secret, password = true) { secret = it }
                     if (k != MachineKind.windows) SwitchRow("Use sudo for actions that need root", m.useSudo) { m = m.copy(useSudo = it) }
-                    if (k == MachineKind.windows) Field("LibreHardwareMonitor web server port (0 = use WMI)", m.lhmPort.toString(), KeyboardType.Number) { m = m.copy(lhmPort = it.toIntOrNull() ?: 0) }
+                    if (k == MachineKind.windows) Field("LibreHardwareMonitor web server port (0 = use WMI)", (m.lhmPort.let { if (it == 0) "" else it.toString() }), KeyboardType.Number) { m = m.copy(lhmPort = it.toIntOrNull() ?: 0) }
                     if (k.isLinux && k != MachineKind.bazzite) Field("Pi-hole v6 web password (optional)", pihole, password = true) { pihole = it }
                 }
             }

@@ -54,7 +54,9 @@ fun MachineScreen(session: Session, wide: Boolean, onBack: () -> Unit, onEdit: (
     val nav by session.nav.collectAsState()
     var current by rememberSaveable(session.id) { mutableStateOf(NavItem.Dashboard) }
     LaunchedEffect(LaunchTarget.tick, nav) {
-        LaunchTarget.page?.let { want -> NavItem.entries.firstOrNull { it.name.equals(want, true) || it.label.equals(want, true) }?.let { if (it in nav) current = it } }
+        LaunchTarget.page?.let { want ->
+            NavItem.entries.firstOrNull { it.name.equals(want, true) || it.label.equals(want, true) }?.let { if (it in nav) { current = it; LaunchTarget.page = null } }
+        }
     }
     if (current !in nav) current = NavItem.Dashboard
     val state by session.state.collectAsState()

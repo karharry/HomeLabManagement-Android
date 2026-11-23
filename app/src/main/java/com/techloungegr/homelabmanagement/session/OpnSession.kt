@@ -19,9 +19,33 @@ class OpnSession(machine: Machine, scope: CoroutineScope) : Session(machine, sco
     private var storage: List<StorageItem> = emptyList()
     private var diag: List<String> = emptyList()
 
-    override fun baseNav() = sortNav(listOf(NavItem.Dashboard, NavItem.Storage, NavItem.Network, NavItem.Services, NavItem.DhcpLeases, NavItem.DnsmasqHosts, NavItem.Updates, NavItem.Alerts, NavItem.History))
-    override val consoleAvailable get() = false
-    override val consoleUnavailableReason get() = "OPNsense is managed over its REST API, which has no console."
+    override fun baseNav() = sortNav(listOf(NavItem.Dashboard, NavItem.Storage, NavItem.Network, NavItem.Services, NavItem.DhcpLeases, NavItem.DnsmasqHosts, NavItem.Updates, NavItem.Alerts, NavItem.History, NavItem.Console))
+    override val consoleAvailable get() = true
+    override val consoleUnavailableReason get() = ""
+
+    /** Read-only API explorer: type an API path (e.g. core/firmware/status) to see the raw JSON. */
+    override suspend fun runConsole(command: String): String {
+        val cmd = command.trim().removePrefix("/").removePrefix("api/")
+        if (cmd.equals("diag", true)) {
+            val sb = StringBuilder()
+            for (p in listOf("diagnostics/system/systemTime", "diagnostics/activity/getActivity", "diagnostics/cpu_usage/getCPUType", "diagnostics/traffic/interface")) {
+                sb.append("== ").append(p).append('\n')
+                try {
+                    val j = c().get(p)
+                    sb.append((if (p.endsWith("getActivity")) j["headers"]?.toString() else j?.toString() ?: "(empty)").orEmpty().take(900))
+                } catch (e: Exception) { sb.append(e.message) }
+                sb.append("\n\n")
+            }
+            return sb.toString()
+        }
+        return try {
+            val post = cmd.startsWith("post ")
+            val path = cmd.removePrefix("post ").trim()
+            if (post && !path.contains("search")) return "Only read-only search endpoints can be called with “post”."
+            val json = if (post) c().post(path) else c().get(path)
+            (json?.toString() ?: "(empty reply)").let { if (it.length > 8000) it.take(8000) + "…" else it }
+        } catch (e: Exception) { e.message ?: "error" }
+    }
 
     private fun c(): OpnClient = client ?: OpnClient(machine.host, machine.port, machine.user, Store.secretOf(id), machine.useTLS, machine.allowSelfSigned).also { client = it }
     override fun closeBackend() { client = null; prevIf = null }
@@ -35,10 +59,14 @@ class OpnSession(machine: Machine, scope: CoroutineScope) : Session(machine, sco
         return n * when (m.groupValues[2].uppercase()) { "K" -> 1024.0; "M" -> 1048576.0; "G" -> 1073741824.0; "T" -> 1099511627776.0; "P" -> 1.125899906842624E15; else -> 1.0 }
     }
     private fun running(v: JsonElement?): Boolean = when (v) {
-        is JsonPrimitive -> v.booleanOrNull ?: (v.intOrNull?.let { it != 0 } ?: v.content.lowercase() in listOf("running", "true", "1", "yes", "started"))
+        is JsonPrimitive -> v.booleanOrNull ?: v.intOrNull?.let { it != 0 } ?: (v.content.lowercase() in listOf("running", "true", "1", "yes", "started"))
         else -> false
     }
     private fun uptimeFromString(s: String): Double {
+        Regex("(?:(\\d+)\\s*days?,?\\s*|(\\d+)\\+)?(\\d+):(\\d+):(\\d+)").find(s)?.let { m ->
+            val d = (m.groupValues[1].ifEmpty { m.groupValues[2] }).toDoubleOrNull() ?: 0.0
+            return d * 86400 + m.groupValues[3].toDouble() * 3600 + m.groupValues[4].toDouble() * 60 + m.groupValues[5].toDouble()
+        }
         var total = 0.0
         Regex("(\\d+)\\s*(day|hour|minute|second)").findAll(s.lowercase()).forEach { m ->
             val n = m.groupValues[1].toDouble(); total += n * when (m.groupValues[2]) { "day" -> 86400; "hour" -> 3600; "minute" -> 60; else -> 1 }
@@ -53,8 +81,9 @@ class OpnSession(machine: Machine, scope: CoroutineScope) : Session(machine, sco
         val info = c.get("diagnostics/system/systemInformation")
         val host = info.s("hostname", "name").ifBlank { machine.host }
         val version = info.s("versionstring", "product_version", "version").ifBlank { (info["versions"] as? JsonArray)?.firstOrNull()?.let { (it as? JsonPrimitive)?.content }.orEmpty() }
-        val os = "OPNsense $version".trim()
+        val os = if (version.startsWith("OPNsense", true)) version else "OPNsense $version".trim()
         var uptime = info.num("uptime", "uptime_seconds") ?: info.str("uptime")?.let { uptimeFromString(it) } ?: 0.0
+        if (uptime == 0.0) tryGet("diagnostics/system/systemTime")?.str("uptime")?.let { uptime = uptimeFromString(it) }
 
         val res = tryGet("diagnostics/system/systemResources")
         var cpu = res.num("cpu", "cpu_usage", "cpu_total", "load") ?: res["cpu"].num("total", "used", "usage", "load")
@@ -80,11 +109,11 @@ class OpnSession(machine: Machine, scope: CoroutineScope) : Session(machine, sco
         push(memHistory, if (mt > 0) mu / mt * 100 else null)
 
         val disk = tryGet("diagnostics/system/systemDisk")
-        val diskRows = disk.rows().ifEmpty { (disk?.get("devices")).rows() }
+        val diskRows = (disk?.get("devices")).rows().ifEmpty { disk.rows() }
         storage = diskRows.mapNotNull { r ->
             val mount = r.str("mountpoint", "mounted_on", "mount", "target", "device", "fs", "filesystem", "_key") ?: "disk"
-            var size = r.num("blocks", "size", "total", "1k-blocks", "disk_size") ?: parseSize(r.str("size", "blocks")) ?: 0.0
-            var used = r.num("used", "used_bytes") ?: parseSize(r.str("used"))
+            var size = r.num("total_bytes") ?: r.num("blocks", "size", "total", "1k-blocks", "disk_size") ?: parseSize(r.str("size", "blocks", "total")) ?: 0.0
+            var used = r.num("used_bytes") ?: r.num("used") ?: parseSize(r.str("used"))
             val avail = r.num("avail", "available", "free") ?: parseSize(r.str("avail", "available"))
             val pct = r.num("capacity", "used_pct", "capacity_pct", "pct")
             if (used == null && avail != null && size > 0) used = maxOf(0.0, size - avail)
@@ -98,15 +127,22 @@ class OpnSession(machine: Machine, scope: CoroutineScope) : Session(machine, sco
             ServiceRow(s.s("id", "name"), s.s("name", "id"), s.str("description", "name") ?: s.s("name"), if (run) "running" else "stopped", run)
         }.sortedBy { it.displayName.lowercase() }
         val ifc = tryGet("diagnostics/interface/getInterfaceConfig")
-        interfaces = ifc.rows().map { r ->
-            val name = r.str("description", "_key", "if") ?: r.s("_key"); val status = r.str("status") ?: if (r.bool("enable") == true) "up" else "down"
-            Item(name, name, listOf(r.str("ipaddr"), r.str("ipaddrv6")).filter { !it.isNullOrBlank() && it.lowercase() != "none" }.joinToString(", "),
-                r.str("if", "_key") ?: "", badge = status, badgeLevel = if (status.lowercase() in listOf("up", "active", "associated")) Level.Info else Level.Warning)
+        val ifEntries: List<Pair<String, JsonElement?>> = (ifc as? JsonObject)?.entries?.map { it.key to it.value as JsonElement? }?.filter { it.second is JsonObject } ?: ifc.rows().map { (it.str("device", "_key") ?: "") to it }
+        interfaces = ifEntries.map { (key, r) ->
+            val dev = r.str("device", "if") ?: key
+            val name = r.str("description", "identifier") ?: dev
+            val status = r.str("status") ?: if (r["flags"].let { f -> (f as? JsonArray)?.any { (it as? JsonPrimitive)?.content == "up" } } == true) "active" else "down"
+            val v4 = r.list("ipv4").mapNotNull { a -> a.str("ipaddr")?.let { ip -> a.num("subnetbits")?.let { "$ip/${it.toInt()}" } ?: ip } }
+            val v6 = r.list("ipv6").mapNotNull { a -> a.str("ipaddr") }.filter { !it.startsWith("fe80") }
+            val flatAddr = listOfNotNull(r.str("ipaddr"), r.str("ipaddrv6")).filter { it.isNotBlank() && it.lowercase() != "none" }
+            Item(dev, name, (v4 + v6 + flatAddr).joinToString(", ").ifBlank { r.str("macaddr").orEmpty() }, if (name != dev) dev else "",
+                badge = status, badgeLevel = if (status.lowercase() in listOf("up", "active", "associated")) Level.Info else Level.Warning,
+                detail = listOfNotNull(r.str("macaddr")?.let { "MAC $it" }, r.str("media")?.let { "Media $it" }, r.str("mtu")?.let { "MTU $it" }).joinToString(" · "))
         }
         var rr: Double? = null; var tr: Double? = null
-        val st = tryGet("diagnostics/interface/getInterfaceStatistics").rows()
-        if (st.isNotEmpty()) {
-            val rx = st.sumOf { it.num("bytes received", "inbytes", "received_bytes") ?: 0.0 }; val tx = st.sumOf { it.num("bytes transmitted", "outbytes", "transmitted_bytes") ?: 0.0 }
+        val stObj = (tryGet("diagnostics/interface/getInterfaceStatistics")?.get("statistics") as? JsonObject)?.values?.filter { it is JsonObject && it.str("network")?.startsWith("<Link") == true && it.str("name") != "lo0" }.orEmpty()
+        if (stObj.isNotEmpty()) {
+            val rx = stObj.sumOf { it.num("received-bytes", "bytes received", "inbytes") ?: 0.0 }; val tx = stObj.sumOf { it.num("sent-bytes", "bytes transmitted", "outbytes") ?: 0.0 }
             val now = System.currentTimeMillis(); prevIf?.let { p -> val dt = (now - p.third) / 1000.0; if (dt > 0.5) { rr = maxOf(0.0, rx - p.first) / dt; tr = maxOf(0.0, tx - p.second) / dt } }
             prevIf = Triple(rx, tx, now)
         }
@@ -163,7 +199,7 @@ class OpnSession(machine: Machine, scope: CoroutineScope) : Session(machine, sco
         }
         return Page(rows.sortedBy { it.s("host", "hostname").lowercase() }.map { r ->
             val uuid = r.s("uuid", "uuidSelector").ifBlank { r.s("_key") }
-            Item(uuid, r.s("host", "hostname") + r.s("domain").let { if (it.isNotBlank()) ".$it" else "" }, listOf(r.s("ip", "address"), r.s("hwaddr", "mac", "hw-address")).filter { it.isNotBlank() }.joinToString(" · "), detail = r.s("descr", "description"),
+            Item(uuid, (r.s("host", "hostname") + r.s("domain").let { if (it.isNotBlank() && r.s("host", "hostname").isNotBlank()) ".$it" else "" }).ifBlank { r.s("ip", "address") }, listOf(r.s("hwaddr", "mac", "hw-address"), r.s("descr", "description")).filter { it.isNotBlank() }.joinToString(" · "),
                 actions = listOf(Act("Remove", confirm = "Remove this static host?", danger = true) { guarded { c().post("dnsmasq/settings/del_host/$uuid"); apply(); null } }))
         }, forms = listOf(add), filterable = true, error = if (rows.isEmpty()) "No static hosts." else null)
     }
@@ -173,7 +209,7 @@ class OpnSession(machine: Machine, scope: CoroutineScope) : Session(machine, sco
         val status = fw.str("status"); val nv = fw.str("new_version", "product_version_new")
         val pkgs = (first(fw, "new_packages", "upgrade_packages") as? JsonArray).orEmpty()
         val items = ArrayList<Block>()
-        items.add(Stats(listOf("Status" to (status ?: "–"))))
+        items.add(Stats(listOfNotNull("Status" to (if (status == null || status.lowercase() in listOf("none", "none_fetched", "up_to_date", "ok")) "Up to date" else status), fw.str("last_check")?.let { "Last checked" to it }, fw.str("product_version")?.let { "Installed" to it })))
         if (status != null && status.lowercase() !in listOf("", "none", "none_fetched", "up_to_date", "ok")) items.add(Item("firmware", "OPNsense firmware", "", nv ?: status))
         pkgs.forEach { p -> items.add(Item("pkg-${p.str("name") ?: p}", p.str("name") ?: (p as? JsonPrimitive)?.content ?: "?", "Package", p.str("new_version").orEmpty())) }
         items.add(Note("Applying firmware updates remotely isn't offered: a failed or interrupted firewall update can leave the box unreachable. Use System > Firmware in the OPNsense web UI."))

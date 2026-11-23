@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.2
+Fixes from testing against a real OPNsense 26.7 firewall:
+- Services now show their real state (all were shown as stopped).
+- Network lists every interface with its addresses and status (it showed one blank card); the System line no longer repeats "OPNsense".
+- Uptime, storage and network speed now work.
+- Static hosts without a hostname show their IP address.
+- Updates page reads "Up to date" with the last check time.
+- New read-only API explorer on the OPNsense Console page (type an API path, or `diag`) to help diagnose other firmware versions.
+
 ## 0.9.1
 Fixes from testing on an AYN Thor against real machines (TrueNAS, Debian, macOS):
 - SSH reliability: page loads use their own connection, a failed command no longer drops the shared connection, concurrent commands are capped, and a dead connection is re-established automatically. This fixes "SSH error: open failed / Disconnected" and stuck "Connecting…" on Processes, Services, Logs, VPN, Tailscale, Startup, Software and Users pages.

@@ -17,12 +17,13 @@ class TrueNasSession(machine: Machine, scope: CoroutineScope) : SshSession(machi
     private var memRt: Double? = null
     private var prevRapl: Pair<Double, Long>? = null
     private var powerWatts: Double? = null
+    private var lastPower = 0L
     private var raw = Snapshot()
     private val sshOn get() = machine.sshEnabled && machine.sshUser.isNotBlank()
 
     override fun baseNav() = sortNav(listOf(NavItem.Dashboard, NavItem.Storage, NavItem.Datasets, NavItem.Shares, NavItem.Network,
         NavItem.Apps, NavItem.Vms, NavItem.Containers, NavItem.Services, NavItem.DataProtection, NavItem.Fan, NavItem.Updates,
-        NavItem.Users, NavItem.Console, NavItem.Alerts, NavItem.Vpn))
+        NavItem.Users, NavItem.Console, NavItem.Alerts, NavItem.Vpn, NavItem.History))
 
     override fun closeBackend() {
         client?.disconnect(); client = null; prevRapl = null
@@ -63,6 +64,13 @@ class TrueNasSession(machine: Machine, scope: CoroutineScope) : SshSession(machi
     private suspend fun rpcOrNull(method: String, vararg params: JsonElement): JsonElement? =
         try { rpc(method, *params) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
 
+    /** Like rpcOrNull, but records why a call failed so the page can say so instead of looking empty. */
+    private suspend fun rpcE(errs: MutableList<String>, method: String, vararg params: JsonElement, timeoutMs: Long = 120_000): JsonElement? =
+        try { (client ?: throw NetError("Not connected to TrueNAS.")).call(method, JsonArray(params.toList()), timeoutMs) }
+        catch (e: CancellationException) { throw e } catch (e: Exception) { errs.add("$method: ${e.message}"); null }
+
+    private fun errNotes(errs: List<String>): List<Block> = errs.map { Note(it, warn = true) }
+
     private var apps: List<JsonObject> = emptyList()
     private var vms: List<JsonObject> = emptyList()
 
@@ -97,7 +105,7 @@ class TrueNasSession(machine: Machine, scope: CoroutineScope) : SshSession(machi
             val sev = levels.indexOf(a.str("level") ?: "INFO").coerceAtLeast(0)
             AlertItem(a.str("uuid") ?: "", if (sev >= 4) Level.Critical else if (sev >= 2) Level.Warning else Level.Info, a.str("formatted") ?: "Alert", a.str("level") ?: "")
         }
-        if (sshOn) samplePower()
+        if (sshOn && System.currentTimeMillis() - lastPower > 30_000) { lastPower = System.currentTimeMillis(); samplePower() }
         val memUsed = if (physmem > 0) physmem * (memRt ?: 0.0) else 0.0
         raw = Snapshot(
             hostName = info.str("hostname") ?: "", os = "TrueNAS " + (info.str("version") ?: ""),
@@ -209,33 +217,40 @@ class TrueNasSession(machine: Machine, scope: CoroutineScope) : SshSession(machi
     }
 
     private suspend fun datasetsPage(): Page {
-        val ds = rpcOrNull("pool.dataset.query").rows().mapNotNull { r -> (r.str("name") ?: r.str("id"))?.let { it to r } }.sortedBy { it.first.lowercase() }
-        val snaps = rpcOrNull("zfs.snapshot.query").rows().mapNotNull { r -> (r.str("name") ?: r.str("id"))?.let { it to r } }.sortedByDescending { it.first }
-        val blocks = ArrayList<Block>()
+        val errs = ArrayList<String>()
+        val opts = { sel: List<String>, limit: Int? -> buildJsonObject { put("select", JsonArray(sel.map { JsonPrimitive(it) })); limit?.let { put("limit", it); put("order_by", JsonArray(listOf(JsonPrimitive("-name")))) } } }
+        val ds = rpcE(errs, "pool.dataset.query", JsonArray(emptyList()), opts(listOf("name", "type", "used", "available", "mountpoint"), null)).rows()
+            .mapNotNull { r -> (r.str("name") ?: r.str("id"))?.let { it to r } }.sortedBy { it.first.lowercase() }
+        val snaps = rpcE(errs, "zfs.snapshot.query", JsonArray(emptyList()), opts(listOf("name", "dataset", "properties"), 300)).rows()
+            .mapNotNull { r -> (r.str("name") ?: r.str("id"))?.let { it to r } }.sortedByDescending { it.first }
+        val blocks = ArrayList<Block>(errNotes(errs))
         blocks.add(Heading("Datasets (${ds.size})"))
-        ds.forEach { (n, r) -> blocks.add(Item(n, n, listOf(r.str("type"), r.str("mountpoint")).filterNotNull().filter { it.isNotBlank() }.joinToString(" · "),
-            "${Fmt.bytes(r.num("used"))} used")) }
-        blocks.add(Heading("Snapshots (${snaps.size})"))
-        snaps.take(300).forEach { (n, r) -> blocks.add(Item(n, n.substringAfter('@'), r.str("dataset") ?: n.substringBefore('@'), Fmt.bytes(r.num("used")))) }
+        ds.forEach { (n, r) -> blocks.add(Item(n, n, listOf(r.str("type"), r.str("mountpoint")).filterNotNull().filter { it.isNotBlank() }.joinToString(" · "), "${Fmt.bytes(r.num("used"))} used")) }
+        blocks.add(Heading("Latest snapshots (${snaps.size}${if (snaps.size >= 300) "+" else ""})"))
+        snaps.forEach { (n, r) -> blocks.add(Item(n, n.substringAfter('@'), r.str("dataset") ?: n.substringBefore('@'), Fmt.bytes(r["properties"].num("used") ?: r.num("used")))) }
         return Page(blocks, filterable = true)
     }
 
     private suspend fun sharesPage(): Page {
-        val items = ArrayList<Block>()
-        rpcOrNull("sharing.smb.query").rows().forEachIndexed { i, r -> items.add(Item("smb-$i", r.str("name") ?: "", r.str("path") ?: "", badge = "SMB", badgeLevel = if (r.bool("enabled") == false) Level.Warning else Level.Info, detail = r.str("comment") ?: "")) }
-        rpcOrNull("sharing.nfs.query").rows().forEachIndexed { i, r ->
+        val errs = ArrayList<String>(); val items = ArrayList<Block>()
+        rpcE(errs, "sharing.smb.query").rows().forEachIndexed { i, r -> items.add(Item("smb-$i", r.str("name") ?: "", r.str("path") ?: "", badge = "SMB", badgeLevel = if (r.bool("enabled") == false) Level.Warning else Level.Info, detail = r.str("comment") ?: "")) }
+        rpcE(errs, "sharing.nfs.query").rows().forEachIndexed { i, r ->
             val paths = r.strList("path").ifEmpty { r.strList("paths") }.ifEmpty { listOfNotNull(r.str("path")) }
             items.add(Item("nfs-$i", paths.firstOrNull() ?: "", paths.joinToString(", "), badge = "NFS", badgeLevel = if (r.bool("enabled") == false) Level.Warning else Level.Info, detail = r.str("comment") ?: ""))
         }
-        return Page(items, filterable = true, error = if (items.isEmpty()) "No shares." else null)
+        return Page(errNotes(errs) + items, filterable = true, error = if (items.isEmpty() && errs.isEmpty()) "No shares." else null)
     }
 
-    private suspend fun networkPage(): Page = Page(rpcOrNull("interface.query").rows().mapNotNull { r ->
-        val name = r.str("name") ?: r.str("id") ?: return@mapNotNull null
-        val state = r["state"]
-        val addrs = state.list("aliases").mapNotNull { it.str("address") }
-        Item(name, name, addrs.joinToString(", "), badge = state.str("link_state") ?: "", badgeLevel = if (state.str("link_state") == "LINK_STATE_UP") Level.Info else Level.Warning)
-    })
+    private suspend fun networkPage(): Page {
+        val errs = ArrayList<String>()
+        val items = rpcE(errs, "interface.query").rows().mapNotNull { r ->
+            val name = r.str("name") ?: r.str("id") ?: return@mapNotNull null
+            val state = r["state"]
+            val addrs = state.list("aliases").mapNotNull { it.str("address") }
+            Item(name, name, addrs.joinToString(", "), badge = state.str("link_state") ?: "", badgeLevel = if (state.str("link_state") == "LINK_STATE_UP") Level.Info else Level.Warning)
+        }
+        return Page(errNotes(errs) + items, error = if (items.isEmpty() && errs.isEmpty()) "No interfaces." else null)
+    }
 
     private suspend fun protectionPage(): Page {
         val items = ArrayList<Block>()
@@ -252,7 +267,8 @@ class TrueNasSession(machine: Machine, scope: CoroutineScope) : SshSession(machi
     }
 
     private suspend fun updatesPage(): Page {
-        val obj = rpcOrNull("update.status") ?: return Page(error = "Couldn't read the update status.")
+        val errs = ArrayList<String>()
+        val obj = rpcE(errs, "update.status") ?: return Page(errNotes(errs), error = "Couldn't read the update status.")
         val labels = mapOf("NORMAL" to "Up to date", "REBOOT_REQUIRED" to "Reboot required to finish an update", "HAS_UPDATE" to "Update available",
             "UPDATE_AVAILABLE" to "Update available", "ERROR" to "Error checking for updates")
         val code = obj.str("code"); val status = obj["status"]
@@ -263,10 +279,14 @@ class TrueNasSession(machine: Machine, scope: CoroutineScope) : SshSession(machi
             Note("Install updates from the TrueNAS web interface; the Linux app is read-only here too.")))
     }
 
-    private suspend fun usersPage(): Page = Page(rpcOrNull("user.query").rows().mapNotNull { r ->
-        val uid = r.num("uid")?.toInt() ?: return@mapNotNull null; val name = r.str("username") ?: return@mapNotNull null
-        Item(uid.toString(), name, r.str("full_name") ?: "", "uid $uid", badge = if (r.bool("locked") == true) "Locked" else "", badgeLevel = Level.Warning)
-    }.sortedBy { it.title.lowercase() }, filterable = true)
+    private suspend fun usersPage(): Page {
+        val errs = ArrayList<String>()
+        val items = rpcE(errs, "user.query").rows().mapNotNull { r ->
+            val uid = r.num("uid")?.toInt() ?: return@mapNotNull null; val name = r.str("username") ?: return@mapNotNull null
+            Item(uid.toString(), name, r.str("full_name") ?: "", "uid $uid", badge = if (r.bool("locked") == true) "Locked" else "", badgeLevel = Level.Warning)
+        }.sortedBy { it.title.lowercase() }
+        return Page(errNotes(errs) + items, filterable = true)
+    }
 
     // ---- containers (Docker over SSH) ----
     private suspend fun containersPage(): Page {

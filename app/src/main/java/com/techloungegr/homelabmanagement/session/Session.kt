@@ -22,6 +22,13 @@ object Scripts {
 
 const val HISTORY_LEN = 90
 
+/** Marks work done for a page/action so it uses its own SSH connection and never disturbs the poll loop. */
+class PageElement : kotlin.coroutines.AbstractCoroutineContextElement(PageElement) {
+    companion object Key : kotlin.coroutines.CoroutineContext.Key<PageElement>
+}
+val PageCtx = PageElement()
+
+
 /** Live state + polling for one managed machine (mirrors MachineSession in the Linux app). */
 abstract class Session(val machine: Machine, protected val scope: CoroutineScope) {
     val id get() = machine.id
@@ -45,6 +52,8 @@ abstract class Session(val machine: Machine, protected val scope: CoroutineScope
     /** One refresh of the dashboard data. Throw to mark the machine as failed. */
     protected abstract suspend fun poll(): Snapshot
     abstract suspend fun loadPage(nav: NavItem, query: String): Page
+    suspend fun page(nav: NavItem, query: String): Page = withContext(PageCtx) { loadPage(nav, query) }
+    suspend fun <T> inPage(block: suspend () -> T): T = withContext(PageCtx) { block() }
     protected open fun closeBackend() {}
     open suspend fun reboot() {}
     open suspend fun shutdown() {}
@@ -122,16 +131,23 @@ abstract class Session(val machine: Machine, protected val scope: CoroutineScope
 /** Base for the sessions that talk SSH (Linux, macOS, Windows). */
 abstract class SshSession(machine: Machine, scope: CoroutineScope) : Session(machine, scope) {
     protected val runner = SshRunner()
+    protected val pageRunner = SshRunner()
     protected val aux = SshRunner()
     protected var prevNet: Triple<Double, Double, Long>? = null
 
-    override fun closeBackend() { runner.close(); aux.close(); prevNet = null }
+    override fun closeBackend() { runner.close(); pageRunner.close(); aux.close(); prevNet = null }
 
-    protected suspend fun sh(script: String, sudo: Boolean = false, merge: Boolean = false, r: SshRunner = runner): String =
-        withContext(Dispatchers.IO) { r.sh(script, sshSettings(), sudo, merge) }
+    private suspend fun pick(r: SshRunner?): SshRunner = r ?: if (kotlin.coroutines.coroutineContext[PageElement] != null) pageRunner else runner
 
-    protected suspend fun ps(script: String, r: SshRunner = runner): String =
-        withContext(Dispatchers.IO) { r.ps(script, sshSettings()) }
+    protected suspend fun sh(script: String, sudo: Boolean = false, merge: Boolean = false, r: SshRunner? = null): String {
+        val use = pick(r)
+        return withContext(Dispatchers.IO) { use.sh(script, sshSettings(), sudo, merge) }
+    }
+
+    protected suspend fun ps(script: String, r: SshRunner? = null): String {
+        val use = pick(r)
+        return withContext(Dispatchers.IO) { use.ps(script, sshSettings()) }
+    }
 
     protected fun netRates(rx: Double, tx: Double): Pair<Double?, Double?> {
         val now = System.currentTimeMillis(); val prev = prevNet; prevNet = Triple(rx, tx, now)
@@ -142,7 +158,7 @@ abstract class SshSession(machine: Machine, scope: CoroutineScope) : Session(mac
     }
 
     override suspend fun runConsole(command: String): String = withContext(Dispatchers.IO) {
-        try { runner.sh(command, sshSettings(), sudo = true, merge = true) } catch (e: Exception) { e.message ?: "error" }
+        try { pageRunner.sh(command, sshSettings(), sudo = true, merge = true) } catch (e: Exception) { e.message ?: "error" }
     }
 }
 

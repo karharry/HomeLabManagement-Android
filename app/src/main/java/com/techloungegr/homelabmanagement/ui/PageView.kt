@@ -45,7 +45,7 @@ fun PageContent(session: Session, nav: NavItem, snackbar: SnackbarHostState) {
         if (state !is ConnState.Connected && nav != NavItem.History) { loading = false; return@LaunchedEffect }
         while (true) {
             try {
-                val p = session.loadPage(nav, submitted)
+                val p = session.page(nav, submitted)
                 page = p; failure = null
             } catch (e: CancellationException) { throw e
             } catch (e: Exception) { failure = e.message ?: e.javaClass.simpleName }
@@ -65,7 +65,7 @@ fun PageContent(session: Session, nav: NavItem, snackbar: SnackbarHostState) {
     fun runAct(a: Act) {
         scope.launch {
             busy = true
-            val r = try { a.run() } catch (e: CancellationException) { throw e } catch (e: Exception) { e.message ?: "error" }
+            val r = try { session.inPage { a.run() } } catch (e: CancellationException) { throw e } catch (e: Exception) { e.message ?: "error" }
             busy = false
             if (r == null) { snackbar.showSnackbar("${a.label}: done"); tick++ } else { result = r; tick++ }
         }
@@ -91,7 +91,7 @@ fun PageContent(session: Session, nav: NavItem, snackbar: SnackbarHostState) {
             }
         }
         when {
-            state !is ConnState.Connected && nav != NavItem.History -> CenterMessage(
+            state !is ConnState.Connected && nav != NavItem.History && p == null -> CenterMessage(
                 when (val s = state) { is ConnState.Failed -> "Not connected: ${s.message}"; ConnState.Connecting -> "Connecting…"; else -> "Not connected." })
             loading && p == null -> Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
             p == null -> CenterMessage(failure ?: "Nothing to show.")
@@ -119,7 +119,7 @@ fun PageContent(session: Session, nav: NavItem, snackbar: SnackbarHostState) {
     activeForm?.let { f ->
         FormDialog(f, onDismiss = { activeForm = null }, onSubmit = { values ->
             activeForm = null
-            scope.launch { busy = true; val r = try { f.submit(values) } catch (e: CancellationException) { throw e } catch (e: Exception) { e.message ?: "error" }; busy = false
+            scope.launch { busy = true; val r = try { session.inPage { f.submit(values) } } catch (e: CancellationException) { throw e } catch (e: Exception) { e.message ?: "error" }; busy = false
                 if (r == null) { snackbar.showSnackbar("${f.label}: done"); tick++ } else { result = r; tick++ } }
         })
     }

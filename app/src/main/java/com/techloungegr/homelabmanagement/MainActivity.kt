@@ -33,6 +33,19 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        readTarget(intent)
         setContent { HomeLabApp() }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        readTarget(intent)
+    }
+
+    private fun readTarget(i: android.content.Intent?) {
+        val m = i?.getStringExtra("machine") ?: return
+        com.techloungegr.homelabmanagement.ui.LaunchTarget.machine = m
+        com.techloungegr.homelabmanagement.ui.LaunchTarget.page = i.getStringExtra("page")
+        com.techloungegr.homelabmanagement.ui.LaunchTarget.tick++
     }
 }

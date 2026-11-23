@@ -19,7 +19,7 @@ class OpnSession(machine: Machine, scope: CoroutineScope) : Session(machine, sco
     private var storage: List<StorageItem> = emptyList()
     private var diag: List<String> = emptyList()
 
-    override fun baseNav() = sortNav(listOf(NavItem.Dashboard, NavItem.Storage, NavItem.Network, NavItem.Services, NavItem.DhcpLeases, NavItem.DnsmasqHosts, NavItem.Updates, NavItem.Alerts))
+    override fun baseNav() = sortNav(listOf(NavItem.Dashboard, NavItem.Storage, NavItem.Network, NavItem.Services, NavItem.DhcpLeases, NavItem.DnsmasqHosts, NavItem.Updates, NavItem.Alerts, NavItem.History))
     override val consoleAvailable get() = false
     override val consoleUnavailableReason get() = "OPNsense is managed over its REST API, which has no console."
 

@@ -10,6 +10,7 @@ import java.io.ByteArrayOutputStream
 import java.security.PublicKey
 import java.security.Security
 import java.util.Base64
+import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.zip.Deflater
 
@@ -35,6 +36,8 @@ fun forgetTlsCert(host: String, port: Int) = Store.forgetPin("tls.$host:$port")
 class SshRunner {
     private var client: SSHClient? = null
     private var connectedTo: SshSettings? = null
+    /** sshd allows ~10 sessions per connection; stay well below that. */
+    private val gate = Semaphore(4)
 
     @Synchronized fun close() {
         try { client?.disconnect() } catch (_: Exception) {}
@@ -46,7 +49,7 @@ class SshRunner {
         client?.let { if (it.isConnected && it.isAuthenticated) return it else close() }
         ensureBouncyCastle()
         val c = SSHClient()
-        c.connectTimeout = 12_000; c.timeout = 60_000
+        c.connectTimeout = 12_000; c.timeout = 120_000
         val pinKey = "ssh.${s.host}:${s.port}"
         c.addHostKeyVerifier(object : HostKeyVerifier {
             override fun verify(hostname: String?, port: Int, key: PublicKey?): Boolean {
@@ -71,6 +74,7 @@ class SshRunner {
             if (root is SshError) throw root
             throw SshError("Network error talking to the machine over SSH: ${e.message ?: e.javaClass.simpleName}")
         }
+        try { c.connection.keepAlive.keepAliveInterval = 15 } catch (_: Exception) {}
         client = c; connectedTo = s
         return c
     }
@@ -92,28 +96,40 @@ class SshRunner {
         }
     }
 
+    private fun alive(): Boolean = client?.let { it.isConnected && it.isAuthenticated } == true
+
+    private fun <T> guarded(s: SshSettings, op: (SSHClient) -> T): T {
+        var last: Exception? = null
+        for (attempt in 1..2) {
+            try {
+                val c = ensure(s)
+                gate.acquire()
+                try { return op(c) } finally { gate.release() }
+            } catch (e: SshError) {
+                if (!alive()) close()
+                last = e
+                if (alive() || e.message?.contains("rejected") == true || e.message?.contains("host key changed") == true) break
+            } catch (e: Exception) {
+                if (!alive()) close()
+                last = SshError("SSH error: ${e.message ?: e.javaClass.simpleName}")
+                if (alive()) break   // the connection is fine; this command just failed
+            }
+        }
+        throw (last as? SshError ?: SshError("SSH error: ${last?.message}"))
+    }
+
     /** Runs a POSIX shell script, optionally under sudo (the SSH password is fed to `sudo -S`). */
     fun sh(script: String, s: SshSettings, sudo: Boolean = false, merge: Boolean = false, maxBytes: Int = 4 * 1024 * 1024): String {
-        try {
-            val c = ensure(s)
-            val b64 = Base64.getEncoder().encodeToString(script.toByteArray(Charsets.UTF_8))
-            val run = "sh -c \"\$(printf %s $b64 | base64 -d)\""
-            val command = if (sudo && s.useSudo && s.user != "root")
-                "printf '%s\\n' ${shQuote(s.password)} | sudo -S -p '' $run" else run
-            val redirect = if (merge) "2>&1" else "2>/dev/null"
-            return exec(c, "($command) $redirect; true", maxBytes)
-        } catch (e: SshError) { close(); throw e
-        } catch (e: Exception) { close(); throw SshError("SSH error: ${e.message ?: e.javaClass.simpleName}") }
+        val b64 = Base64.getEncoder().encodeToString(script.toByteArray(Charsets.UTF_8))
+        val run = "sh -c \"\$(printf %s $b64 | base64 -d)\""
+        val command = if (sudo && s.useSudo && s.user != "root") "printf '%s\\n' ${shQuote(s.password)} | sudo -S -p '' $run" else run
+        val redirect = if (merge) "2>&1" else "2>/dev/null"
+        return guarded(s) { exec(it, "($command) $redirect; true", maxBytes) }
     }
 
     /** Runs a PowerShell script via a compressed -EncodedCommand so quoting never matters. */
-    fun ps(script: String, s: SshSettings, maxBytes: Int = 8 * 1024 * 1024): String {
-        try {
-            val c = ensure(s)
-            return exec(c, psCommand(script), maxBytes)
-        } catch (e: SshError) { close(); throw e
-        } catch (e: Exception) { close(); throw SshError("SSH error: ${e.message ?: e.javaClass.simpleName}") }
-    }
+    fun ps(script: String, s: SshSettings, maxBytes: Int = 8 * 1024 * 1024): String =
+        guarded(s) { exec(it, psCommand(script), maxBytes) }
 
     companion object {
         fun psCommand(script: String): String {

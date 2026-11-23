@@ -79,7 +79,7 @@ class MacSession(machine: Machine, scope: CoroutineScope) : LinuxSession(machine
     override suspend fun processesPage(): Page {
         val list = sh(Scripts.get("mac_PROCESSES_SCRIPT")).lines().mapNotNull { raw ->
             val f = raw.trim().split(Regex("\\s+"), 4); if (f.size != 4) return@mapNotNull null
-            ProcessRow(f[0].toLongOrNull() ?: return@mapNotNull null, f[3], f[1].toDoubleOrNull() ?: return@mapNotNull null, (f[2].toDoubleOrNull() ?: return@mapNotNull null) * 1024)
+            ProcessRow(f[0].toLongOrNull() ?: return@mapNotNull null, f[3].substringAfterLast('/'), f[1].toDoubleOrNull() ?: return@mapNotNull null, (f[2].toDoubleOrNull() ?: return@mapNotNull null) * 1024)
         }
         return processList(list, memAsBytes = true) { p -> guarded { sh("kill -9 ${p.pid}", sudo = true, merge = true).ifBlank { null } } }
     }

@@ -123,7 +123,7 @@ open class LinuxSession(machine: Machine, scope: CoroutineScope) : SshSession(ma
         features.clear(); features.addAll(sec["FEAT"].orEmpty().map { it.trim() }.filter { it.isNotEmpty() })
         virt = "VTX" in features
         refreshNav()
-        if (System.currentTimeMillis() - lastPower > 10_000) { lastPower = System.currentTimeMillis(); samplePower() }
+        if (System.currentTimeMillis() - lastPower > 30_000) { lastPower = System.currentTimeMillis(); samplePower() }
         extraPoll()
         return Snapshot(hostName, os, up, cpu, used, total, rr, tr, power, fs, alerts, cpuHistory.toList(), memHistory.toList())
     }

@@ -15,6 +15,13 @@ import androidx.compose.ui.unit.dp
 import com.techloungegr.homelabmanagement.BuildConfig
 import com.techloungegr.homelabmanagement.session.SessionManager
 
+/** Lets `adb shell am start ... --es machine <name> --es page <page>` jump straight to a machine/page (used for testing). */
+object LaunchTarget {
+    var machine by mutableStateOf<String?>(null)
+    var page by mutableStateOf<String?>(null)
+    var tick by mutableIntStateOf(0)
+}
+
 private sealed interface Route {
     data object Home : Route
     data class Machine(val id: String) : Route
@@ -34,10 +41,14 @@ fun HomeLabApp() {
                 else -> Route.Home
             }
             fun go(r: String) { routeKey = r }
-            val wide = LocalConfiguration.current.screenWidthDp >= 840
+            val wide = LocalConfiguration.current.screenWidthDp >= 720
             val machines by SessionManager.machines.collectAsState()
 
             LaunchedEffect(route) { SessionManager.select((route as? Route.Machine)?.id) }
+            LaunchedEffect(LaunchTarget.tick, machines) {
+                val name = LaunchTarget.machine ?: return@LaunchedEffect
+                machines.firstOrNull { it.displayName.equals(name, true) }?.let { routeKey = "machine:${it.id}" }
+            }
             BackHandler(enabled = route != Route.Home) {
                 routeKey = when (route) { is Route.Edit -> if (route.id != null) "machine:${route.id}" else "home"; else -> "home" }
             }
